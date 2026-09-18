@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>176B on 2× RTX 3060 · Field benchmark</title>
+<meta name="description" content="Field benchmark: a 176B-parameter Qwen-based MoE (Qwen3.8-Flash-Next, IQ4_XS quant) served by llama.cpp on 2× RTX 3060 12 GB, with prompt-cache economics that make it usable for quality-first long-running work.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,450;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B1017;
+    --bg-2:#0F151E;
+    --panel:#131C27;
+    --panel-2:#182432;
+    --hair:#253241;
+    --hair-soft:#1C2835;
+    --text:#E7EDF5;
+    --muted:#9AA9BB;
+    --dim:#687C93;
+    --amber:#F0A93B;
+    --amber-soft:rgba(240,169,59,.14);
+    --teal:#59C7B4;
+    --teal-soft:rgba(89,199,180,.12);
+    --red:#E0705F;
+    --display:'Fraunces','Charter','Georgia',serif;
+    --sans:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+    --mono:'IBM Plex Mono','SFMono-Regular',ui-monospace,monospace;
+    --chrome:54px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* faint instrument grid */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:
+      linear-gradient(rgba(151,179,214,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(151,179,214,.035) 1px, transparent 1px);
+    background-size:72px 72px;
+    pointer-events:none;
+  }
+  a{color:inherit;text-decoration:none}
+  a:focus-visible, button:focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:2px}
+  ::selection{background:var(--amber-soft)}
+
+  .mono{font-family:var(--mono)}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ============ frame ============ */
+  .frame{max-width:1560px;margin:0 auto;padding:0 clamp(16px,2.5vw,40px)}
+
+  /* ============ chrome bar ============ */
+  .chrome{
+    position:sticky;top:0;z-index:40;
+    display:flex;align-items:center;gap:20px;
+    height:var(--chrome);
+    padding:0 clamp(16px,2.5vw,40px);
+    background:rgba(11,16,23,.82);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--hair-soft);
+    font-family:var(--mono);font-size:12px;
+  }
+  .chrome .ident{display:flex;align-items:center;gap:10px;letter-spacing:.06em}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
+  .chrome nav{display:flex;gap:18px;margin-left:auto;color:var(--dim)}
+  .chrome nav a:hover{color:var(--text)}
+  .mode{
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+    color:var(--muted);background:transparent;
+    border:1px solid var(--hair);padding:6px 12px;border-radius:3px;cursor:pointer;
+  }
+  .mode:hover{color:var(--text);border-color:var(--dim)}
+  @media (max-width:900px){ .chrome nav{display:none} }
+
+  /* ============ hero (16:9 lock) ============ */
+  .hero{
+    position:relative;
+    aspect-ratio:16/9;
+    min-height:600px;
+    max-height:calc(100vh - var(--chrome));
+    overflow:hidden;
+    border-bottom:1px solid var(--hair-soft);
+    display:flex;flex-direction:column;
+  }
+  .hero-inner{
+    flex:1;display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(340px,458px);
+    gap:clamp(24px,3vw,56px);
+    padding:clamp(28px,3.4vw,64px) clamp(24px,3vw,64px) 0;
+    align-content:start;
+  }
+  .eyebrow{
+    font-family:var(--mono);font-size:12px;font-weight:500;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--amber);
+    display:flex;align-items:center;gap:12px;
+  }
+  .eyebrow::before{content:"";width:34px;height:1px;background:var(--amber)}
+  .hero h1{
+    font-family:var(--display);
+    font-weight:450;
+    font-size:clamp(38px,4.9vw,76px);
+    line-height:1.06;
+    letter-spacing:-.012em;
+    margin:18px 0 0;
+    max-width:15ch;
+  }
+  .hero h1 em{font-style:normal;font-weight:300;color:var(--muted)}
+  .deck{
+    margin-top:18px;max-width:54ch;
+    font-size:clamp(15px,1.15vw,19px);
+    color:var(--muted);line-height:1.6;
+  }
+  .deck strong{color:var(--text);font-weight:600}
+  .hero-meta{margin-top:16px;font-family:var(--mono);font-size:12.5px;color:var(--dim);letter-spacing:.02em}
+  .hero-meta b{color:var(--teal);font-weight:500}
+
+  /* ledger signature strip */
+  .ledger{
+    margin:0 clamp(24px,3vw,64px) clamp(22px,2.6vw,40px);
+    border:1px solid var(--hair);
+    border-radius:6px;
+    background:linear-gradient(180deg, rgba(19,28,39,.7), rgba(15,21,30,.9));
+    padding:16px 22px 14px;
+  }
+  .ledger-head{
+    display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+    font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--dim);margin-bottom:16px;
+  }
+  .ledger-head .sig{color:var(--muted)}
+  .ledger-head .hint{margin-left:auto;font-size:11px;letter-spacing:.03em;text-transform:none}
+  .ledger-rows{list-style:none;display:flex;flex-direction:column;gap:7px}
+  .lrow{display:grid;grid-template-columns:150px minmax(0,1fr) 240px;gap:14px;align-items:center;font-family:var(--mono);font-size:12px}
+  .lrow .task{color:var(--muted)}
+  .lrow .bar{height:9px;background:var(--hair-soft);position:relative}
+  .lrow .bar i{
+    position:absolute;left:0;top:0;bottom:0;
+    background:linear-gradient(90deg,var(--amber),#F6C87A);
+  }
+  .lrow.warm .bar i{background:linear-gradient(90deg,var(--teal),#8EDFCF)}
+  .lrow .val{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+  .lrow .val small{color:var(--dim)}
+
+  /* instrument card */
+  .panel{
+    border:1px solid var(--hair);border-radius:6px;
+    background:var(--panel);
+    padding:20px 22px;
+  }
+  .panel-title{
+    font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--dim);margin-bottom:18px;display:flex;gap:10px;align-items:center;
+  }
+  .cardrow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--hair-soft)}
+  .cardrow .name{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+  .cardrow .name b{color:var(--text);font-weight:500}
+  .split{margin:4px 0 2px;height:6px;border-radius:3px;background:var(--hair-soft);overflow:hidden;display:flex}
+  .split i{height:100%}
+  .split .g0{background:#3D5873}
+  .split .g1{background:var(--teal)}
+  .kvline{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--dim);padding:8px 0;border-bottom:1px solid var(--hair-soft)}
+  .kvline b{color:var(--muted);font-weight:400}
+  .readout{margin-top:16px;border:1px solid var(--hair-soft);border-radius:5px;padding:14px 16px;background:var(--bg-2)}
+  .readout .label{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .readout .big{font-family:var(--mono);font-size:30px;font-weight:500;color:var(--amber);letter-spacing:-.01em;margin-top:2px}
+  .readout .big span{font-size:15px;color:var(--muted);font-weight:400}
+  .readout .sub{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:6px}
+
+  /* ============ sections ============ */
+  section{padding:clamp(56px,7vw,96px) 0;border-top:1px solid var(--hair-soft)}
+  .sec-head{display:flex;align-items:baseline;gap:24px;margin-bottom:36px}
+  .sec-head h2{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--text)}
+  .sec-head .line{flex:1;height:1px;background:var(--hair)}
+  .sec-head .n{font-family:var(--mono);font-size:12px;color:var(--dim)}
+
+  /* metrics */
+  .metric-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:20px}
+  .tbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px}
+  .tbl th{text-align:left;font-size:10.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);padding:10px 12px;border-bottom:1px solid var(--hair)}
+  .tbl th:not(:first-child), .tbl td:not(:first-child){text-align:right}
+  .tbl td{padding:11px 12px;border-bottom:1px solid var(--hair-soft);color:var(--muted);font-variant-numeric:tabular-nums}
+  .tbl td:first-child{color:var(--text)}
+  .tbl td em{font-style:normal;color:var(--dim)}
+  .tbl tr:hover td{background:rgba(151,179,214,.03)}
+  .badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;padding:3px 8px;border-radius:3px;border:1px solid}
+  .badge.cold{color:var(--amber);border-color:var(--amber);background:var(--amber-soft)}
+  .badge.warm{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  .badge.tool{color:#C6A2E0;border-color:#7B5EA7;background:rgba(123,94,167,.14)}
+
+  .barchart{margin-top:26px}
+  .barchart .cap{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.03em;margin-bottom:14px;display:flex;justify-content:space-between}
+  .bars{display:flex;flex-direction:column;gap:9px}
+  .brow{display:grid;grid-template-columns:96px minmax(0,1fr) 64px;gap:12px;align-items:center;font-family:var(--mono);font-size:11.5px}
+  .brow .b{height:14px;background:var(--hair-soft);position:relative}
+  .brow .b i{position:absolute;left:0;top:0;bottom:0;background:var(--teal)}
+  .brow .b i.warn{background:var(--red)}
+  .brow .b i.base{background:#3D5873}
+  .brow .v{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+
+  .flags{margin-top:20px;border:1px solid var(--hair);border-radius:6px;background:var(--bg-2);padding:18px 22px}
+  .flags h3{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
+  .flags code{display:block;font-family:var(--mono);font-size:12.5px;color:#B8C7DA;white-space:pre-wrap;line-height:1.7}
+  .flags code .c{color:var(--dim)}
+
+  /* observations */
+  .obs-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .obs{
+    border:1px solid var(--hair);border-radius:6px;background:var(--panel);
+    padding:22px 22px 24px;display:flex;flex-direction:column;gap:10px;
+    transition:border-color .2s ease, transform .2s ease;
+  }
+  .obs:hover{border-color:#33465C;transform:translateY(-2px)}
+  .obs .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--amber)}
+  .obs .tag.t{color:var(--teal)}
+  .obs .tag.r{color:var(--red)}
+  .obs h3{font-family:var(--display);font-weight:450;font-size:19px;line-height:1.3;letter-spacing:-.005em}
+  .obs p{font-size:14px;color:var(--muted);line-height:1.6}
+  .obs .stat{margin-top:auto;padding-top:14px;font-family:var(--mono);font-size:12px;color:var(--text);border-top:1px dashed var(--hair)}
+  .obs .stat span{color:var(--dim)}
+
+  /* highlight */
+  .highlight{
+    background:
+      radial-gradient(1200px 480px at 20% 0%, rgba(240,169,59,.07), transparent 60%),
+      var(--bg-2);
+  }
+  .hl-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:clamp(24px,4vw,64px);align-items:start}
+  .hl-quote{
+    font-family:var(--display);font-weight:300;
+    font-size:clamp(24px,2.6vw,40px);line-height:1.32;letter-spacing:-.01em;
+    color:var(--text);max-width:34ch;
+  }
+  .hl-quote b{font-weight:600;color:#F6C87A}
+  .hl-body{font-size:15px;color:var(--muted);margin-top:20px;max-width:52ch;line-height:1.65}
+  .vs{display:flex;flex-direction:column;gap:12px}
+  .vs .vs-head{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .vs-card{border:1px solid var(--hair);border-radius:6px;padding:16px 18px;background:var(--panel);display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center}
+  .vs-card .gauge{width:44px;height:44px;border-radius:4px;border:2px solid var(--hair)}
+  .vs-card.pick .gauge{border-color:var(--amber);background:var(--amber-soft)}
+  .vs-card h4{font-size:14px;font-weight:600;margin-bottom:3px}
+  .vs-card p{font-size:12.5px;color:var(--dim);line-height:1.5}
+  .vs-card .tok{font-family:var(--mono);font-size:13px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .vs-note{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.5}
+  .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  .chip{
+    font-family:var(--mono);font-size:12px;letter-spacing:.02em;
+    border:1px solid var(--hair);border-radius:3px;padding:8px 14px;color:var(--muted);
+    background:var(--panel);
+  }
+  .chip b{color:var(--text);font-weight:500}
+
+  /* footer */
+  footer{
+    border-top:1px solid var(--hair);
+    background:var(--bg);
+    padding:clamp(28px,3.5vw,48px) 0;
+  }
+  .foot{display:flex;flex-wrap:wrap;gap:24px;align-items:baseline;justify-content:space-between}
+  .foot .brand{font-family:var(--mono);font-size:13px;color:var(--muted);letter-spacing:.03em}
+  .foot .brand b{color:var(--text);font-weight:500}
+  .foot .links{display:flex;gap:20px;flex-wrap:wrap;font-family:var(--mono);font-size:12px}
+  .foot .links a{color:var(--muted)}
+  .foot .links a:hover{color:var(--amber)}
+  .foot .note{width:100%;font-size:12px;color:var(--dim);line-height:1.6;border-top:1px dashed var(--hair);padding-top:18px;margin-top:6px}
+
+  /* ============ responsive ============ */
+  @media (max-width:1100px){
+    .hero{aspect-ratio:auto;max-height:none;min-height:0}
+    .hero-inner{grid-template-columns:1fr}
+    .metric-grid{grid-template-columns:1fr}
+    .obs-grid{grid-template-columns:1fr 1fr}
+    .hl-grid{grid-template-columns:1fr}
+    .lrow{grid-template-columns:130px minmax(0,1fr) 190px}
+  }
+  @media (max-width:680px){
+    .obs-grid{grid-template-columns:1fr}
+    .lrow{grid-template-columns:1fr;gap:2px}
+    .lrow .val{text-align:left}
+    .tbl{font-size:11.5px}
+    .tbl th,.tbl td{padding:8px 6px}
+  }
+
+  /* tighten for short 16:9 viewports so the hero never clips */
+  @media (min-width:1000px) and (max-height:980px){
+    .hero-inner{padding-top:clamp(18px,2.4vh,32px)}
+    .hero h1{font-size:clamp(32px,4.2vw,66px)}
+    .deck{margin-top:12px;font-size:clamp(14px,1.05vw,17px)}
+    .hero-meta{margin-top:10px}
+    .ledger{padding:12px 20px 11px;margin-bottom:clamp(14px,1.6vh,24px)}
+    .ledger-head{margin-bottom:11px}
+    .ledger-rows{gap:5px}
+  }
+  @media (min-width:1000px) and (max-height:780px){
+    .hero-inner{padding-top:16px;gap:18px}
+    .hero h1{font-size:clamp(28px,3.4vw,50px);margin:10px 0 0}
+    .deck{font-size:14.5px;line-height:1.55;margin-top:10px}
+    .hero-meta{font-size:11px;margin-top:8px}
+    .ledger{padding:10px 18px 9px;margin-bottom:12px}
+    .ledger-head{margin-bottom:8px;gap:10px}
+    .ledger-rows{gap:4px}
+    .lrow{font-size:11px}
+    .panel{padding:14px 16px}
+    .cardrow{padding:6px 0}
+    .readout{padding:10px 14px;margin-top:10px}
+    .readout .big{font-size:24px}
+  }
+
+  @media (prefers-reduced-motion:no-preference){
+    .rise{animation:rise .7s cubic-bezier(.22,1,.36,1) both}
+    .rise.d1{animation-delay:.10s}
+    .rise.d2{animation-delay:.22s}
+    .rise.d3{animation-delay:.36s}
+    @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  }
+
+  /* hero-only mode */
+  body.hero-only section, body.hero-only footer{display:none}
+  body.hero-only .hero{min-height:calc(100vh - var(--chrome))}
+</style>
+</head>
+<body>
+
+<header class="chrome">
+  <span class="ident"><span class="dot"></span> QWEN3.8-FLASH-NEXT · FIELD RUN</span>
+  <span class="mono" style="color:var(--dim)">OBS-2025-09-17</span>
+  <nav>
+    <a href="#metrics">Metrics</a>
+    <a href="#observations">Observations</a>
+    <a href="#verdict">Verdict</a>
+  </nav>
+  <button class="mode" id="modeBtn" type="button">HERO 16:9</button>
+</header>
+
+<!-- ================= HERO ================= -->
+<div class="hero">
+  <div class="hero-inner">
+    <div>
+      <p class="eyebrow rise">176B parameter MoE · 2× consumer RTX 3060 12 GB</p>
+      <h1 class="rise d1">The speed is not the story.<br><em>The cache is.</em></h1>
+      <p class="deck rise d2">
+        A 176B-class Qwen-based MoE (<strong>Qwen3.8-Flash-Next</strong>, IQ4_XS quant, 84.9 GB GGUF) serves real agent
+        traffic on two RTX 3060 12 GB cards through llama.cpp. The first request pays <strong>~4m31s of cold prefill</strong>;
+        every turn after that reuses 99%+ of the prompt and answers in <strong>1.6–3.2 seconds</strong>.
+        At 12–15 tok/s it is not fast. It is <strong>usable exactly where quality outruns speed</strong>: persistent agents
+        and long-running batch review on hardware bought for gaming.
+      </p>
+      <p class="hero-meta rise d3">
+        llama.cpp server · slot ctx 131,072 · KV unified + FA · <b>LCP prompt cache</b> · ngram-mod speculation · single-user agent load
+      </p>
+    </div>
+
+    <aside class="panel rise d2" aria-label="Setup">
+      <p class="panel-title">Setup <span style="margin-left:auto;color:var(--dim)">observed</span></p>
+
+      <div class="cardrow">
+        <span class="name"><b>RTX 3060 12 GB</b> · CUDA 0</span>
+        <span class="mono" style="color:var(--text);font-size:12.5px">model ≈ 6.9 GB</span>
+      </div>
+      <div class="split" title="VRAM share of model weights">
+        <i class="g0" style="width:38%"></i><i class="g1" style="width:62%"></i>
+      </div>
+
+      <div class="cardrow">
+        <span class="name"><b>RTX 3060 12 GB</b> · CUDA 1</span>
+        <span class="mono" style="color:var(--text);font-size:12.5px">model ≈ 11.0 GB</span>
+      </div>
+      <div class="split" title="VRAM share of model weights">
+        <i class="g1" style="width:61%;margin-left:39%"></i>
+      </div>
+      <p class="mono" style="font-size:11px;color:var(--dim);margin-top:8px">
+        split tuned by hand: <span style="color:var(--amber)">-ts 3.5,1</span> · symmetric 1,1 OOM'd (15.9 GB on one card)
+      </p>
+
+      <div class="kvline"><b>Host RAM pool</b><span>~63 GB usable · mmap / page-cache</span></div>
+      <div class="kvline"><b>Weights in RAM</b><span>≈ 34 GB resident + 39 GB pageable n-gram table</span></div>
+      <div class="kvline"><b>Model total</b><span>84.9 GB GGUF (publisher-reported)</span></div>
+
+      <div class="readout">
+        <p class="label">Generation throughput · steady state</p>
+        <p class="big">≈ 15 <span>tok/s working rate</span></p>
+        <p class="sub">logged range 12.03–12.29 tok/s on cached turns · see note [1]</p>
+      </div>
+    </aside>
+  </div>
+
+  <!-- signature: prompt-cache ledger, log scale -->
+  <div class="ledger rise d3" aria-label="Prompt cache ledger">
+    <p class="ledger-head">
+      <span class="sig">Prompt-cache ledger · total request time</span>
+      <span class="hint">width ∝ log(seconds) · full bar = 272.1 s · raw server timings</span>
+    </p>
+    <ul class="ledger-rows">
+      <li class="lrow">
+        <span class="task">Task 0 · cold prefix</span>
+        <span class="bar"><i style="width:98%"></i></span>
+        <span class="val">272.10 s <small>· 26,499 tokens in</small></span>
+      </li>
+      <li class="lrow warm">
+        <span class="task">Task 65 · cached turn</span>
+        <span class="bar"><i style="width:8.2%"></i></span>
+        <span class="val">1.60 s <small>· 170× cheaper</small></span>
+      </li>
+      <li class="lrow warm">
+        <span class="task">Task 77 · cached turn</span>
+        <span class="bar"><i style="width:20.2%"></i></span>
+        <span class="val">3.17 s <small>· 28 tok out</small></span>
+      </li>
+      <li class="lrow">
+        <span class="task">Task 108 · tool loop</span>
+        <span class="bar"><i style="width:32.2%"></i></span>
+        <span class="val">6.31 s <small>· spec 3.1% accept</small></span>
+      </li>
+      <li class="lrow">
+        <span class="task">Task 140 · cached delta</span>
+        <span class="bar"><i style="width:56.1%"></i></span>
+        <span class="val">24.74 s <small>· 870 in / 205 out</small></span>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<div class="frame">
+
+  <!-- ================= METRICS ================= -->
+  <section id="metrics" style="border-top:none">
+    <div class="sec-head">
+      <h2>01 · Metrics</h2>
+      <span class="line"></span>
+      <span class="n">single slot · n_ctx 131072 · kv_unified · measured, not simulated</span>
+    </div>
+
+    <div class="metric-grid">
+      <div class="panel" style="overflow-x:auto">
+        <p class="panel-title">Request ledger</p>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Task</th><th>State</th><th>LCP sim</th><th>Δ in</th><th>Prefill</th><th>P tok/s</th><th>Gen</th><th>G tok/s</th><th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>0</td><td><span class="badge cold">cold</span></td><td style="color:var(--dim)">n/a</td><td>26,499</td>
+              <td>271.41 s</td><td>97.64</td><td>9</td><td>11.60</td><td><b style="color:var(--text)">272.10 s</b></td>
+            </tr>
+            <tr>
+              <td>65</td><td><span class="badge warm">warm</span></td><td>0.999</td><td>16</td>
+              <td>0.93 s</td><td><em>~17†</em></td><td>9</td><td>12.03</td><td><b style="color:var(--text)">1.60 s</b></td>
+            </tr>
+            <tr>
+              <td>77</td><td><span class="badge warm">warm</span></td><td>0.999</td><td>18</td>
+              <td>0.97 s</td><td><em>~18†</em></td><td>28</td><td>12.29</td><td><b style="color:var(--text)">3.17 s</b></td>
+            </tr>
+            <tr>
+              <td>108</td><td><span class="badge tool">tool loop</span></td><td>0.995</td><td>142</td>
+              <td>1.81 s</td><td>78.36</td><td>32</td><td style="color:var(--red)">6.90</td><td><b style="color:var(--text)">6.31 s</b></td>
+            </tr>
+            <tr>
+              <td>140</td><td><span class="badge warm">warm</span></td><td>0.968</td><td>870</td>
+              <td>7.91 s</td><td>109.94</td><td>205</td><td>12.13</td><td><b style="color:var(--text)">24.74 s</b></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="mono" style="font-size:11px;color:var(--dim);margin-top:14px">
+          † Tiny cached deltas are dominated by fixed overhead; their tok/s is not comparable to large-prefill throughput.
+          Truncation: none. Slot at 27,823 tokens by task 140.
+        </p>
+
+        <div class="flags">
+          <h3>Reproduction flags · the run that worked</h3>
+          <code><span class="c"># 2× RTX 3060 12 GB · Ubuntu Server · llama.cpp CUDA</span>
+-sm layer  -ts 3.5,1  --n-cpu-moe 32  -ngl 99  -c 131072
+-ctk q4_0  -ctv q4_0  --parallel 1  --kv-unified  -fa on
+<span class="c"># speculation: ngram-mod (accepted on repetitive work, A/B open)</span></code>
+        </div>
+      </div>
+
+      <div class="panel">
+        <p class="panel-title">Generation throughput</p>
+        <div class="barchart">
+          <p class="cap"><span>tok/s per request · linear</span><span>0–16 scale</span></p>
+          <div class="bars">
+            <div class="brow"><span>Cold t0</span><span class="b"><i class="base" style="width:72.5%"></i></span><span class="v">11.60</span></div>
+            <div class="brow"><span>Warm t65</span><span class="b"><i style="width:75.2%"></i></span><span class="v">12.03</span></div>
+            <div class="brow"><span>Warm t77</span><span class="b"><i style="width:76.8%"></i></span><span class="v">12.29</span></div>
+            <div class="brow"><span>Tool t108</span><span class="b"><i class="warn" style="width:43.1%"></i></span><span class="v" style="color:var(--red)">6.90</span></div>
+            <div class="brow"><span>Warm t140</span><span class="b"><i style="width:75.8%"></i></span><span class="v">12.13</span></div>
+            <div class="brow"><span>Working rate</span><span class="b"><i style="width:93.8%;background:var(--amber)"></i></span><span class="v" style="color:var(--amber)">~15</span></div>
+          </div>
+          <p class="mono" style="font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6">
+            Logged bars are server timings. The dip on task 108 coincides with 2/64 draft acceptance (3.125%);
+            correlation from one turn, not proof. The working-rate bar is the rate I watch it run at day to day, note [1].
+          </p>
+        </div>
+
+        <div class="readout" style="margin-top:26px">
+          <p class="label">Cold prefill · prompt ingestion</p>
+          <p class="big" style="color:var(--teal)">97.64 <span>tok/s on 26,499 tokens</span></p>
+          <p class="sub">CPU-assisted MoE experts (32 layers offloaded) keep GPU load survivable</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= OBSERVATIONS ================= -->
+  <section id="observations">
+    <div class="sec-head">
+      <h2>02 · Observations</h2>
+      <span class="line"></span>
+      <span class="n">what the numbers actually say</span>
+    </div>
+    <div class="obs-grid">
+      <article class="obs">
+        <span class="tag">Prefill dominates</span>
+        <h3>Four minutes of debt, then cheap</h3>
+        <p>Cold prefill ate 271.4 s of a 272.1 s request. Steady-state generation is not the limiting UX factor; ingesting the agent prefix is.</p>
+        <p class="stat">271.4 s prefill <span>/ 0.7 s generation on t0</span></p>
+      </article>
+
+      <article class="obs">
+        <span class="tag t">Cache is the product</span>
+        <h3>Prefix cache turns 26.5k into 16</h3>
+        <p>llama.cpp matched each new prompt against the slot by longest-common-prefix similarity and re-evaluated only the delta. Per-turn work collapsed from 26,499 tokens to 16–18, at 0.999 similarity.</p>
+        <p class="stat">170× cheaper warm turns <span>· 272.1 s → 1.6 s</span></p>
+      </article>
+
+      <article class="obs">
+        <span class="tag r">Speculation is not free</span>
+        <h3>A draft model that barely drafts</h3>
+        <p>ngram-mod accepted 2 of 64 tokens on the tool loop (3.125%) and that turn ran at half speed. Speculation needs an A/B baseline before it earns a flag.</p>
+        <p class="stat">3.125% draft acceptance <span>· 6.90 tok/s on the same slot</span></p>
+      </article>
+
+      <article class="obs">
+        <span class="tag">Topology was hand-fit</span>
+        <h3>A split that no symmetric rule gives you</h3>
+        <p>-ts 1,1 loaded 15.9 GB of model onto one 12 GB card and OOM'd. 3,1 helped; 3.5,1 was the first split that started with the full 131k context. Early MoE layers sit on CPU, so the split is lopsided by design.</p>
+        <p class="stat">6.9 GB / 11.0 GB <span>· per-card model allocation</span></p>
+      </article>
+
+      <article class="obs">
+        <span class="tag">80 GB-class, consumer VRAM</span>
+        <h3>24 GB of VRAM, 85 GB of model</h3>
+        <p>Roughly 34 GB of weights stay resident in 64 GB-class host RAM; the 39 GB sparse n-gram table lives in mmap page-cache instead of VRAM. That is the only reason this fits.</p>
+        <p class="stat">45.8 GB in-memory <span>· 39.1 GB pageable table</span></p>
+      </article>
+
+      <article class="obs">
+        <span class="tag t">Scope honesty</span>
+        <h3>One machine, one operator</h3>
+        <p>A field test, not a controlled cross-hardware benchmark. Build flags, CPU/RAM bandwidth, PCIe topology, page-cache state and prompt shape all move these numbers.</p>
+        <p class="stat">Raw log published <span>· logs/session-redacted.md</span></p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= HIGHLIGHT / VERDICT ================= -->
+  <section id="verdict" class="highlight">
+    <div class="sec-head">
+      <h2>03 · Verdict</h2>
+      <span class="line"></span>
+      <span class="n">the case for big-sparse-on-small-GPU</span>
+    </div>
+    <div class="hl-grid">
+      <div>
+        <p class="hl-quote">
+          For work that waits anyway, <b>a large sparse model at ~15 tok/s beats a small model at higher speed</b>. Quality is the deliverable; latency is not.
+        </p>
+        <p class="hl-body">
+          This is not an attempt to win chat latency. The workloads are batched review over files and project artifacts,
+          where minutes of cold-start are acceptable, prompt caching makes every later step nearly free, and the answer
+          being right matters more than the answer being quick. Consumer GPUs, one machine, no datacenter.
+        </p>
+        <div class="chips">
+          <span class="chip"><b>Quality-first</b> batch &amp; agent work</span>
+          <span class="chip">Long-running jobs <b>that tolerate cold start</b></span>
+          <span class="chip"><b>File &amp; artifact review</b> in-context</span>
+          <span class="chip">Slot stays <b>hot across a batch</b></span>
+        </div>
+      </div>
+      <div class="vs">
+        <p class="vs-head">Same two cards, two model classes</p>
+        <div class="vs-card">
+          <span class="gauge"></span>
+          <div><h4>Small MoE (~30B A3B-class)</h4><p>Much faster per token on this hardware…</p></div>
+          <span class="tok">high tok/s<br>materially weaker</span>
+        </div>
+        <div class="vs-card">
+          <span class="gauge"></span>
+          <div><h4>Dense ~27B</h4><p>Runs locally at generation speeds in the same general range…</p></div>
+          <span class="tok">≈ same tok/s<br>far less capacity</span>
+        </div>
+        <div class="vs-card pick">
+          <span class="gauge"></span>
+          <div><h4>176B sparse MoE · this run</h4><p>…while the big sparse model trades a slower clock for the answer quality these tasks actually need.</p></div>
+          <span class="tok" style="color:var(--amber)">12–15 tok/s<br>largest capacity</span>
+        </div>
+        <p class="vs-note">Throughput here is a consequence, not the metric. The metric is how many review turns come out right per batch.</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="frame">
+    <div class="foot">
+      <p class="brand"><b>Local AI experiment</b> · llama.cpp · Qwen-based setup</p>
+      <p class="links">
+        <a href="https://huggingface.co/AtomicChat/Qwen3.8-Flash-Next-GGUF" target="_blank" rel="noopener">Model card ↗</a>
+        <a href="https://github.com/ggml-org/llama.cpp/blob/master/docs/multi-gpu.md" target="_blank" rel="noopener">llama.cpp multi-GPU ↗</a>
+        <a href="https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md" target="_blank" rel="noopener">Speculative decoding ↗</a>
+        <a href="https://github.com/Ruivalim/qwen38-flash-next-2x3060-benchmark" target="_blank" rel="noopener">This repo · raw logs ↗</a>
+      </p>
+      <p class="note">
+        [1] Single-machine field test, not a controlled benchmark. "176B": the parameter class we report for the model; the exact GGUF
+        (AD-3.84bpw-IQ4_XS-M64) defines the weights. "≈15 tok/s" is the rate I watch it work at day to day;
+        the llama.cpp timings in the included session log read 12.03–12.29 tok/s on cached turns, so both numbers are published side by side.
+        Results depend on build, CPU/RAM bandwidth, PCIe topology, page-cache state, prompt shape and sampling.
+        Repo: README.md · RESULTS.md · logs/ · 2025
+      </p>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const btn=document.getElementById('modeBtn');
+  btn.addEventListener('click',()=>{
+    document.body.classList.toggle('hero-only');
+    btn.textContent=document.body.classList.contains('hero-only')?'FULL PAGE':'HERO 16:9';
+    window.scrollTo(0,0);
+  });
+</script>
+</body>
+</html>
