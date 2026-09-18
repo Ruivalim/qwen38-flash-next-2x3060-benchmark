@@ -1,5 +1,7 @@
 # Qwen3.8-Flash-Next on 2× RTX 3060 12 GB with llama.cpp
 
+![Showcase page for this benchmark: a 176B-class Qwen-based MoE on 2× RTX 3060 12 GB, showing cold-prefill cost against cached-turn economics](experiment.png)
+
 Real-world agent benchmark of **AtomicChat/Qwen3.8-Flash-Next-GGUF**, specifically the **AD-3.84bpw-IQ4_XS-M64** quant, running on a small Ubuntu LLM server with **2× NVIDIA RTX 3060 12 GB**.
 
 The goal was not maximum chat latency. The goal was to find out whether a very large MoE model could be useful as a **quality-first local agent / batch worker** on consumer GPUs, with most expert weights partially offloaded to system RAM.
@@ -140,6 +142,44 @@ This is not intended to beat small local models on latency. I have workloads whe
 Smaller MoE models (for example ~30B A3B-class models) are much faster on this hardware, but have been materially weaker for these tasks. Dense ~27B models can also run locally, but generation throughput can be in the same general range while offering a much smaller model capacity.
 
 For this use case, **a large sparse model at ~12 tok/s can be more attractive than a much smaller model at higher throughput**.
+
+## Showcase page
+
+The cover image is a screenshot of `experiment.html`, a single-file 16:9 summary
+page generated **in one shot** by Pi, with this same model serving the request on
+this same llama.cpp instance. Neither `experiment.html` nor `experiment.png` was
+edited by hand afterwards: the page is the model's output as it came out, and
+the screenshot is a straight capture of it.
+
+The prompt was:
+
+```text
+Create a page in html that displays the current experiment we are doing.
+
+We are running a 176B parameter model on 2x RTX 3060 12GB at around 15 tokens per second.
+My specific use-case for this long running tasks, where quality matters way more than speed.
+
+You may check the current repository to see the tests and results yourself.
+
+I want the style to be clean, profissional and tech/AI stuff.
+
+Use elegant and polished elements, nothing fantasy or exaggerated sci-fi visuals.
+Something to showcase the surprisingly usable performance on consumer GPUs for the right jobs.
+
+Use a 16x9 layout, including a hero section, metrics, observations, highlight section and a footer with "Local AI experiment • llama.cpp • Qwen-based setup"
+
+This should look like a high-quality visual summary card / benchmark page, not like a generic blog article or documentation page.
+```
+
+Two numbers in that prompt are the requester's own framing, not measurements
+from this repository, and they carried into the page: the **176B** parameter
+class and the **~15 tok/s** working rate. This repo never measures a parameter
+count, and the generation numbers in `RESULTS.md` top out at 12.29 tok/s on warm
+cached turns. The page keeps both figures and adds a footnote saying so, which is
+worth reading before quoting either number.
+
+- `experiment.html`
+- `experiment.png` (screenshot of the above)
 
 ## References
 
